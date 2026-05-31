@@ -1,34 +1,34 @@
 import 'dart:io';
 
+import 'package:otzaria_core/otzaria_core.dart';
+import 'package:server/api.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart';
-import 'package:shelf_router/shelf_router.dart';
-
-// Configure routes.
-final _router = Router()
-  ..get('/', _rootHandler)
-  ..get('/echo/<message>', _echoHandler);
-
-Response _rootHandler(Request req) {
-  return Response.ok('Hello, World!\n');
-}
-
-Response _echoHandler(Request request) {
-  final message = request.params['message'];
-  return Response.ok('$message\n');
-}
 
 void main(List<String> args) async {
-  // Use any available host or container IP (usually `0.0.0.0`).
-  final ip = InternetAddress.anyIPv4;
+  // נתיב ל-seforim.db מ-env (חובה ל-production). ברירת מחדל לפיתוח מקומי.
+  final dbPath = Platform.environment['SEFORIM_DB_PATH'] ??
+      r'C:\ProgramData\otzaria\books\seforim.db';
 
-  // Configure a pipeline that logs requests.
+  if (!File(dbPath).existsSync()) {
+    stderr.writeln('FATAL: seforim.db not found at "$dbPath" '
+        '(set SEFORIM_DB_PATH).');
+    exitCode = 1;
+    return;
+  }
+
+  // פתיחה ל-קריאה-בלבד — השרת לעולם לא כותב למאגר.
+  final db = MyDatabase.readOnly(dbPath);
+  // פתיחה מוקדמת כדי לכשול מהר אם ה-DB לא תקין.
+  await db.database;
+  print('Opened seforim.db (read-only): $dbPath');
+
   final handler = Pipeline()
       .addMiddleware(logRequests())
-      .addHandler(_router.call);
+      .addHandler(buildApiRouter(db).call);
 
-  // For running in containers, we respect the PORT environment variable.
+  final ip = InternetAddress.anyIPv4;
   final port = int.parse(Platform.environment['PORT'] ?? '8080');
   final server = await serve(handler, ip, port);
-  print('Server listening on port ${server.port}');
+  print('Server listening on http://${server.address.host}:${server.port}');
 }

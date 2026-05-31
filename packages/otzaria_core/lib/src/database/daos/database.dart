@@ -137,7 +137,18 @@ class MyDatabase {
   /// אין סינגלטון ברירת-מחדל — כל קוד הצורך גישה ל-seforim.db עובר דרך
   /// [SqliteDataProvider], וקוד הצורך גישה ל-user_books.db דרך
   /// [UserBooksDatabaseHolder].
-  MyDatabase.withPath(String path) : _path = path;
+  MyDatabase.withPath(String path)
+      : _path = path,
+        _readOnly = false;
+
+  /// פתיחה ל-**קריאה בלבד** של DB קיים (השרת). נפתח עם `OpenMode.readOnly`,
+  /// **בלי** `PRAGMA journal_mode=WAL` ו**בלי** סקריפטי יצירת הסכמה — השרת
+  /// לעולם לא כותב ל-seforim.db, וה-DB נבנה מראש.
+  MyDatabase.readOnly(String path)
+      : _path = path,
+        _readOnly = true;
+
+  final bool _readOnly;
 
   Future<sqlite3.Database> get database async {
     if (_database != null) return _database!;
@@ -149,6 +160,11 @@ class MyDatabase {
   }
 
   sqlite3.Database _initDatabase() {
+    if (_readOnly) {
+      // קריאה בלבד: ללא WAL, ללא CREATE — לא נוגעים בקובץ.
+      return sqlite3.sqlite3.open(_path, mode: sqlite3.OpenMode.readOnly);
+    }
+
     final db = sqlite3.sqlite3.open(_path);
 
     // Enable WAL for concurrent read/write access (uniform across all platforms).
