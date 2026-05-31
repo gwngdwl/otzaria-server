@@ -1,49 +1,35 @@
-A server app built using [Shelf](https://pub.dev/packages/shelf),
-configured to enable running with [Docker](https://www.docker.com/).
+Otzaria API server built with [Shelf](https://pub.dev/packages/shelf).
 
-This sample code handles HTTP GET requests to `/` and `/echo/<message>`
+The current MVP exposes:
 
-# Running the sample
+- `GET /health`
+- `GET /version`, read from `db_meta.content_version_int` in `seforim.db`
 
 ## Running with the Dart SDK
 
-You can run the example with the [Dart SDK](https://dart.dev/get-dart)
-like this:
+Set `SEFORIM_DB_PATH` to an existing `seforim.db` and run the server:
 
-```
-$ dart run bin/server.dart
-Server listening on port 8080
+```bash
+SEFORIM_DB_PATH=/srv/otzaria/seforim.db dart run bin/server.dart
 ```
 
-And then from a second terminal:
-```
-$ curl http://0.0.0.0:8080
-Hello, World!
-$ curl http://0.0.0.0:8080/echo/I_love_Dart
-I_love_Dart
+Then verify:
+
+```bash
+curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/version
 ```
 
 ## Running with Docker
 
-If you have [Docker Desktop](https://www.docker.com/get-started) installed, you
-can build and run with the `docker` command:
+Build from the repository root so Docker can see both `apps/server` and the local `packages/otzaria_core` dependency:
 
-```
-$ docker build . -t myserver
-$ docker run -it -p 8080:8080 myserver
-Server listening on port 8080
-```
-
-And then from a second terminal:
-```
-$ curl http://0.0.0.0:8080
-Hello, World!
-$ curl http://0.0.0.0:8080/echo/I_love_Dart
-I_love_Dart
+```bash
+docker build -f apps/server/Dockerfile -t otzaria-server .
+docker run --rm -p 8080:8080 \
+	-e SEFORIM_DB_PATH=/data/seforim.db \
+	-v /srv/otzaria/seforim.db:/data/seforim.db:ro \
+	otzaria-server
 ```
 
-You should see the logging printed in the first terminal:
-```
-2021-05-06T15:47:04.620417  0:00:00.000158 GET     [200] /
-2021-05-06T15:47:08.392928  0:00:00.001216 GET     [200] /echo/I_love_Dart
-```
+For VPS deployment, prefer the root `compose.yaml`; see `deploy/README.md`.

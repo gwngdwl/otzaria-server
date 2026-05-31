@@ -1,0 +1,11 @@
+.git
+.github
+.idea
+.vscode
+**/.dart_tool
+**/build
+**/.packages
+**/.DS_Store
+tools/search_engine_poc/search_engine.dll
+tools/search_engine_poc/self_index
+tools/search_engine_poc/real_index
