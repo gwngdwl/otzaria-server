@@ -1,0 +1,41 @@
+-- Queries for persistent cache of external PDF outlines
+
+selectByFilePath:
+SELECT *
+FROM pdf_outline_cache
+WHERE filePath = ?
+LIMIT 1;
+
+selectAllFilePaths:
+SELECT filePath
+FROM pdf_outline_cache;
+
+upsert:
+INSERT INTO pdf_outline_cache (
+  filePath,
+  fileSize,
+  lastModified,
+  outlineJson,
+  createdAt,
+  accessedAt
+)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(filePath) DO UPDATE SET
+  fileSize = excluded.fileSize,
+  lastModified = excluded.lastModified,
+  outlineJson = excluded.outlineJson,
+  createdAt = excluded.createdAt,
+  accessedAt = excluded.accessedAt;
+
+updateAccessedAt:
+UPDATE pdf_outline_cache
+SET accessedAt = ?
+WHERE filePath = ?;
+
+deleteByFilePath:
+DELETE FROM pdf_outline_cache
+WHERE filePath = ?;
+
+deleteAccessedBefore:
+DELETE FROM pdf_outline_cache
+WHERE accessedAt < ?;

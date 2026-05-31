@@ -1,0 +1,22 @@
+# Dart / Pub
+.dart_tool/
+.packages
+build/
+.dart_tool/package_config.json
+
+# Native engine libraries — NOT committed. These come from the
+# `Y-PLONI/otzaria_search_engine` GitHub release (precompiled_*) or a local
+# Flutter build, and are bundled at deploy time (see NEXT_STEPS.md, insight 2).
+*.dll
+*.so
+*.dylib
+*.lib
+*.a
+
+# Local data the server reads (provided out-of-band, never in git)
+*.db
+/index/
+
+# OS / editor
+.DS_Store
+Thumbs.db
