@@ -11,6 +11,10 @@ The current MVP exposes:
 - `GET /books/{id}/text` — full raw text (`text/plain`, lines joined by `\n`, nikud/teamim preserved)
 - `GET /books/{id}/text/range?start=&end=` — `{ startLine, endLine, totalLines, lines[] }` by `lineIndex` (inclusive)
 - `GET /books/{id}/toc` — table-of-contents tree (`{ text, index, level, children[] }`)
+- `GET /books/{id}/links` — all links where the book is the source
+- `GET /books/{id}/links/range?start=&end=&targets=` — links in a line range (by `lineIndex`); `targets` = comma-separated `targetBookId`s to filter
+- `POST /links/content` — body `{ "targetLineIds": [int,…] }` → `{ "content": { "<lineId>": "<text>" } }`
+- ⭐ `GET /books/{id}/page?start=&end=&commentators=` — **lines + links + commentary content in a single call** (commentary keyed `"targetBookId:targetLineId"`). This is the endpoint that avoids a network round-trip per scroll.
 
 All catalog/content endpoints read directly through the `otzaria_core` DAOs/repository, so the
 output matches what the Flutter client loads from the local library (parity). The server only ever

@@ -39,6 +39,7 @@
 - [x] **שלב 1 (חילוץ `otzaria_core`) — ✅ הושלם.** package Dart טהור (DAOs+models+נורמליזציה+`.sq` מוטמעים), `dart test` ירוק, אפס Flutter.
 - [x] **שלב 2 (חיבור DB + `/version`) — ✅ הושלם.** `MyDatabase.readOnly`, `/health`, `/version` (מ‑`db_meta`), Dockerfile + compose.
 - [x] **שלב 3 (קטלוג ותוכן ספר) — ✅ הושלם.** `/library`, `/books`, `/books/{id}`, `/exists`, `/text`, `/text/range`, `/toc`. 14 טסטים ירוקים + smoke‑test מול DB אמיתי (ראה למטה).
+- [x] **שלב 4 (קישורים + עמוד מאוחד ⭐) — ✅ הושלם.** `/links`, `/links/range`, `POST /links/content`, ו‑`/page` המאוחד. 24 טסטים ירוקים + smoke‑test מול DB אמיתי (5 שורות בראשית → 5 שורות + 2600 קישורים + 2501 תוכני מפרשים בקריאה אחת).
 
 ---
 
@@ -163,15 +164,23 @@
 
 ---
 
-## שלב 4 — קישורים + endpoint עמוד מאוחד ⭐
+## שלב 4 — קישורים + endpoint עמוד מאוחד ⭐ ✅ הושלם
 
 **מטרה:** לפתור את אתגר ה‑latency (כל גלילה = round‑trip).
 
-- `GET /books/{id}/links/range` — קישורים בטווח, מסונן למפרשים.
-- `POST /links/content` — תוכן יעד ל‑batch קישורים.
-- ⭐ `GET /books/{id}/page?start=&end=&commentators=[...]` — שורות + קישורים + תוכן מפרשים **בקריאה אחת**.
+**מה בוצע בפועל** (ב‑[apps/server/lib/api.dart](apps/server/lib/api.dart)):
+- `GET /books/{id}/links` — כל הקישורים שבהם הספר הוא המקור (`LinkDao.selectLinksBySourceBook`).
+- `GET /books/{id}/links/range?start=&end=&targets=` — קישורים בטווח שורות (לפי `lineIndex`), `targets`=רשימת `targetBookId` מופרדת בפסיקים לסינון. כולל `sourceLineIndex` (ממופה מ‑`lineId`) ו‑`targetBookTitle`.
+- `POST /links/content` — גוף `{ "targetLineIds": [int,…] }` → `{ "content": { "<lineId>": "<text>" } }`.
+- ⭐ `GET /books/{id}/page?start=&end=&commentators=` — שורות + קישורים + תוכן מפרשים **בקריאה אחת**. תוכן המפרשים ממופתח `"targetBookId:targetLineId"`. `commentators` ריק = כל הקישורים בטווח.
 
-**Done:** גלילה בספר עם מפרשים נטענת בקריאה אחת, latency סביר.
+**אימות:**
+- **24 טסטים ירוקים** — seed הורחב עם `connection_type`, `link`, וספר מפרש (רש"י) עם שורות יעד; כל endpoint נבדק כולל סינון/400/404.
+- **Smoke‑test מול DB אמיתי:** `/books/1/page?start=0&end=4` החזיר 5 שורות + **2600 קישורים + 2501 תוכני מפרשים בקריאה אחת**, עם `sourceLineIndex`/`targetBookTitle` תקינים → אתגר ה‑latency נפתר.
+
+> **🐞 באג שהתגלה ב‑otzaria_core (לתיקון upstream):** `LinkDao.selectLinksBySourceLineIds` שבור — ה‑`.sq` המוטמע מכיל `WHERE l.sourceLineId IN ?` (**ללא סוגריים**), וה‑DAO מחליף את ה‑`?` ב‑`?,?` ⇒ `IN ?,?` (תחביר SQL שגוי, `near "?": syntax error`). התיקון הנכון: `IN (?)` ב‑`.sq` המקורי (ואז ה‑gen). **עוקף בשרת:** ה‑endpoints של שלב 4 מריצים את אותה שאילתה ישירות עם `IN (?,?,…)` תקין (ראה `_linksForSourceLineIds`), ולכן אינם תלויים בתיקון. כדאי לתקן את ה‑`.sq` באפליקציה כי ייתכן שגם היא נפגעת.
+
+**Done:** ✅ גלילה בספר עם מפרשים נטענת בקריאה אחת.
 
 ---
 

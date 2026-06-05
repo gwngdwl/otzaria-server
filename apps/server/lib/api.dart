@@ -168,7 +168,179 @@ Router buildApiRouter(MyDatabase db) {
     return _json({'bookId': bookId, 'toc': _buildTocTree(entries)});
   });
 
+  // ── שלב 4: קישורים + עמוד מאוחד ⭐ ────────────────────────────────────────
+
+  /// כל הקישורים שבהם הספר הוא המקור.
+  router.get('/books/<id|[0-9]+>/links', (Request req, String id) async {
+    final bookId = int.parse(id);
+    final book = await db.bookDao.getBookById(bookId);
+    if (book == null) return _notFound('book', bookId);
+    final rows = await db.linkDao.selectLinksBySourceBook(bookId);
+    return _json([for (final r in rows) _linkJson(r)]);
+  });
+
+  /// קישורים בטווח שורות (לפי lineIndex, כולל קצוות). `?targets=12,34` מסנן
+  /// ל-targetBookId נבחרים. כולל `sourceLineIndex` (ממופה מ-id) לחיבור בלקוח.
+  router.get('/books/<id|[0-9]+>/links/range', (Request req, String id) async {
+    final bookId = int.parse(id);
+    final book = await db.bookDao.getBookById(bookId);
+    if (book == null) return _notFound('book', bookId);
+
+    final q = req.url.queryParameters;
+    final start = int.tryParse(q['start'] ?? '');
+    final end = int.tryParse(q['end'] ?? '');
+    if (start == null || end == null) {
+      return _json(
+          {'error': 'start and end (lineIndex) query params are required'},
+          status: 400);
+    }
+    if (end < start) return _json({'error': 'end must be >= start'}, status: 400);
+    final targets = _parseIntCsv(q['targets']);
+
+    final lines = await db.lineDao.selectByBookIdRange(bookId, start, end);
+    final indexById = {for (final l in lines) l.id: l.lineIndex};
+    final rows = await _linksForSourceLineIds(db, indexById.keys.toList());
+    final filtered = targets.isEmpty
+        ? rows
+        : rows.where((r) => targets.contains(r['targetBookId'] as int)).toList();
+    return _json([
+      for (final r in filtered)
+        {
+          ..._linkJson(r),
+          'sourceLineIndex': indexById[r['sourceLineId']],
+          'targetBookTitle': r['targetBookTitle'],
+        }
+    ]);
+  });
+
+  /// תוכן יעד ל-batch קישורים. גוף: `{ "targetLineIds": [int, ...] }`.
+  /// מחזיר `{ "content": { "<lineId>": "<text>" } }`.
+  router.post('/links/content', (Request req) async {
+    final body = await _readJsonBody(req);
+    if (body is! Map || body['targetLineIds'] is! List) {
+      return _json({'error': 'body must be { "targetLineIds": [int, ...] }'},
+          status: 400);
+    }
+    final ids = [for (final v in body['targetLineIds'] as List) if (v is int) v];
+    final content = <String, String>{};
+    for (final lineId in ids) {
+      final line = await db.lineDao.getLineById(lineId);
+      if (line != null) content['$lineId'] = line.content;
+    }
+    return _json({'content': content});
+  });
+
+  /// ⭐ עמוד מאוחד: שורות בטווח + הקישורים בטווח + תוכן המפרשים, בקריאה אחת.
+  /// `?commentators=12,34` מסנן את הקישורים ל-targetBookId נבחרים (ריק = הכול).
+  /// פותר את אתגר ה-latency (מפרט §5.1) — מונע round-trip לכל גלילה.
+  router.get('/books/<id|[0-9]+>/page', (Request req, String id) async {
+    final bookId = int.parse(id);
+    final book = await db.bookDao.getBookById(bookId);
+    if (book == null) return _notFound('book', bookId);
+
+    final q = req.url.queryParameters;
+    final start = int.tryParse(q['start'] ?? '');
+    final end = int.tryParse(q['end'] ?? '');
+    if (start == null || end == null) {
+      return _json(
+          {'error': 'start and end (lineIndex) query params are required'},
+          status: 400);
+    }
+    if (end < start) return _json({'error': 'end must be >= start'}, status: 400);
+    final commentators = _parseIntCsv(q['commentators']);
+
+    final lines = await db.lineDao.selectByBookIdRange(bookId, start, end);
+    final indexById = {for (final l in lines) l.id: l.lineIndex};
+    final rows = await _linksForSourceLineIds(db, indexById.keys.toList());
+    final selected = commentators.isEmpty
+        ? rows
+        : rows
+            .where((r) => commentators.contains(r['targetBookId'] as int))
+            .toList();
+
+    final links = <Map<String, dynamic>>[];
+    final commentaryContent = <String, String>{};
+    for (final r in selected) {
+      final targetBookId = r['targetBookId'] as int;
+      final targetLineId = r['targetLineId'] as int;
+      links.add({
+        ..._linkJson(r),
+        'sourceLineIndex': indexById[r['sourceLineId']],
+        'targetBookTitle': r['targetBookTitle'],
+      });
+      commentaryContent['$targetBookId:$targetLineId'] =
+          (r['targetText'] as String?) ?? '';
+    }
+
+    return _json({
+      'bookId': bookId,
+      'startLine': start,
+      'endLine': end,
+      'totalLines': book.totalLines,
+      'lines': [
+        for (final l in lines)
+          {'index': l.lineIndex, 'content': l.content, 'heRef': l.heRef}
+      ],
+      'links': links,
+      'commentaryContent': commentaryContent,
+    });
+  });
+
   return router;
+}
+
+/// שולף קישורים לפי source lineIds (עם תוכן היעד), עם הגנה מפני `IN ()` ריק.
+///
+/// השאילתה רצה ישירות ולא דרך `LinkDao.selectLinksBySourceLineIds` בגלל באג
+/// ב-otzaria_core: ה-`.sq` המוטמע מכיל `IN ?` (ללא סוגריים), וה-DAO מחליף
+/// `?` ב-`?,?` ⇒ `IN ?,?` (תחביר שגוי). כאן בונים `IN (?,?,…)` תקין.
+Future<List<Map<String, dynamic>>> _linksForSourceLineIds(
+    MyDatabase db, List<int> lineIds) async {
+  if (lineIds.isEmpty) return const [];
+  final raw = await db.database;
+  final placeholders = List.filled(lineIds.length, '?').join(',');
+  return raw.select('''
+    SELECT l.*, ct.name AS connectionType, b.title AS targetBookTitle,
+           tl.content AS targetText
+    FROM link l
+    JOIN connection_type ct ON l.connectionTypeId = ct.id
+    JOIN book b ON l.targetBookId = b.id
+    JOIN line tl ON l.targetLineId = tl.id
+    WHERE l.sourceLineId IN ($placeholders)
+    ORDER BY b.orderIndex
+  ''', lineIds).toMapList();
+}
+
+/// סריאליזציה אחידה של שורת קישור (תוצאת JOIN ל-connection_type).
+Map<String, dynamic> _linkJson(Map<String, dynamic> row) => {
+      'id': row['id'],
+      'sourceBookId': row['sourceBookId'],
+      'targetBookId': row['targetBookId'],
+      'sourceLineId': row['sourceLineId'],
+      'targetLineId': row['targetLineId'],
+      'connectionType':
+          ConnectionType.fromString((row['connectionType'] ?? 'OTHER').toString())
+              .toJson(),
+    };
+
+/// פירוק רשימת מספרים מופרדת בפסיקים (`"12,34"`). ריק/null → רשימה ריקה.
+List<int> _parseIntCsv(String? csv) {
+  if (csv == null || csv.trim().isEmpty) return const [];
+  return [
+    for (final p in csv.split(','))
+      if (int.tryParse(p.trim()) != null) int.parse(p.trim())
+  ];
+}
+
+/// קורא גוף בקשה כ-JSON; מחזיר null אם ריק/לא תקין.
+Future<Object?> _readJsonBody(Request req) async {
+  final s = await req.readAsString();
+  if (s.isEmpty) return null;
+  try {
+    return jsonDecode(s);
+  } catch (_) {
+    return null;
+  }
 }
 
 /// בונה עץ TOC מרשימה שטוחה (ממוינת ב-lineIndex) באמצעות parentId.

@@ -115,6 +115,28 @@ String _seedFullDb() {
   db.execute(
       'INSERT INTO tocEntry VALUES (1001, 1, 1000, 101, 2, 12, 2, 1, 0)');
 
+  // ספר מפרש (רש"י, id=3) בקטגוריה 2, עם שורות יעד.
+  db.execute(
+      "INSERT INTO book (id, categoryId, title, orderIndex, totalLines) "
+      "VALUES (3, 2, 'רשי על בראשית', 5, 2)");
+  db.execute(
+      "INSERT INTO line VALUES (30, 3, 0, 'פירוש על פסוק א', NULL, NULL)");
+  db.execute(
+      "INSERT INTO line VALUES (31, 3, 1, 'פירוש על פסוק ב', NULL, NULL)");
+
+  db.execute('''
+    CREATE TABLE connection_type (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)''');
+  db.execute("INSERT INTO connection_type VALUES (1, 'COMMENTARY')");
+
+  db.execute('''
+    CREATE TABLE link (id INTEGER PRIMARY KEY, sourceBookId INTEGER NOT NULL,
+      targetBookId INTEGER NOT NULL, sourceLineId INTEGER NOT NULL,
+      targetLineId INTEGER NOT NULL, connectionTypeId INTEGER NOT NULL)''');
+  // קישור משורה 0 בבראשית (id 10) ← רש"י שורה 0 (id 30)
+  db.execute('INSERT INTO link VALUES (500, 1, 3, 10, 30, 1)');
+  // קישור משורה 2 בבראשית (id 12) ← רש"י שורה 1 (id 31)
+  db.execute('INSERT INTO link VALUES (501, 1, 3, 12, 31, 1)');
+
   db.close();
   return path;
 }
@@ -215,11 +237,11 @@ void main() {
       // ספר "הקדמה" יושב ישירות תחת השורש.
       expect((torah['books'] as List).map((b) => b['title']), contains('הקדמה'));
 
-      // תת-קטגוריה "בראשית" עם הספר שלה + מחרוזת author.
-      final sub = (torah['subCategories'] as List).single;
-      expect(sub['title'], 'בראשית');
-      final book = (sub['books'] as List).single;
-      expect(book['title'], 'ספר בראשית');
+      // תת-קטגוריה "בראשית" עם הספרים שלה + מחרוזת author.
+      final sub = (torah['subCategories'] as List)
+          .firstWhere((c) => c['title'] == 'בראשית');
+      final book = (sub['books'] as List)
+          .firstWhere((b) => b['title'] == 'ספר בראשית');
       expect(book['author'], 'משה רבנו');
       expect(book['hasNekudot'], true);
     });
@@ -227,8 +249,9 @@ void main() {
     test('GET /books?category= filters to one category', () async {
       final (status, json) = await _get(router, '/books?category=2');
       expect(status, 200);
-      expect((json as List), hasLength(1));
-      expect(json.first['title'], 'ספר בראשית');
+      // קטגוריה 2 מכילה את "ספר בראשית" ואת המפרש "רשי על בראשית".
+      expect((json as List).map((b) => b['title']),
+          containsAll(['ספר בראשית', 'רשי על בראשית']));
     });
 
     test('GET /books returns full flat list', () async {
@@ -305,6 +328,115 @@ void main() {
       expect(children, hasLength(1));
       expect(children.first['text'], 'פסוק ב');
       expect(children.first['index'], 2);
+    });
+  });
+
+  group('Stage 4 — links & unified page', () {
+    late MyDatabase db;
+    late Router router;
+    late String dbPath;
+
+    setUp(() async {
+      dbPath = _seedFullDb();
+      db = MyDatabase.readOnly(dbPath);
+      await db.database;
+      router = buildApiRouter(db);
+    });
+
+    tearDown(() {
+      db.close();
+      Directory(dbPath).parent.deleteSync(recursive: true);
+    });
+
+    test('GET /books/{id}/links returns all source links', () async {
+      final (status, json) = await _get(router, '/books/1/links');
+      expect(status, 200);
+      expect((json as List), hasLength(2));
+      expect(json.first['connectionType'], 'commentary');
+      expect(json.map((l) => l['targetBookId']), everyElement(3));
+    });
+
+    test('GET /books/{id}/links/range filters by line range', () async {
+      // טווח שורה 0 בלבד → רק הקישור משורה 10 (lineIndex 0).
+      final (status, json) = await _get(router, '/books/1/links/range?start=0&end=0');
+      expect(status, 200);
+      expect((json as List), hasLength(1));
+      expect(json.first['sourceLineIndex'], 0);
+      expect(json.first['targetBookTitle'], 'רשי על בראשית');
+    });
+
+    test('GET /books/{id}/links/range with targets filter', () async {
+      final (s1, j1) = await _get(router, '/books/1/links/range?start=0&end=2&targets=3');
+      expect(s1, 200);
+      expect((j1 as List), hasLength(2));
+      // targetBookId 999 לא קיים → מסונן הכול.
+      final (s2, j2) = await _get(router, '/books/1/links/range?start=0&end=2&targets=999');
+      expect(s2, 200);
+      expect((j2 as List), isEmpty);
+    });
+
+    test('GET /books/{id}/links/range missing params → 400', () async {
+      final (status, _) = await _get(router, '/books/1/links/range?start=0');
+      expect(status, 400);
+    });
+
+    test('POST /links/content returns target content by lineId', () async {
+      final res = await router.call(Request(
+        'POST',
+        Uri.parse('http://localhost/links/content'),
+        body: jsonEncode({'targetLineIds': [30, 31, 99999]}),
+      ));
+      expect(res.statusCode, 200);
+      final json = jsonDecode(await res.readAsString());
+      expect(json['content']['30'], 'פירוש על פסוק א');
+      expect(json['content']['31'], 'פירוש על פסוק ב');
+      expect(json['content'].containsKey('99999'), false);
+    });
+
+    test('POST /links/content bad body → 400', () async {
+      final res = await router.call(Request(
+        'POST',
+        Uri.parse('http://localhost/links/content'),
+        body: jsonEncode({'wrong': true}),
+      ));
+      expect(res.statusCode, 400);
+    });
+
+    test('GET /books/{id}/page unifies lines + links + commentary', () async {
+      final (status, json) = await _get(router, '/books/1/page?start=0&end=2');
+      expect(status, 200);
+      expect(json['totalLines'], 3);
+      expect((json['lines'] as List), hasLength(3));
+      expect((json['links'] as List), hasLength(2));
+      // תוכן המפרשים ממופתח כ-"targetBookId:targetLineId".
+      final cc = json['commentaryContent'] as Map;
+      expect(cc['3:30'], 'פירוש על פסוק א');
+      expect(cc['3:31'], 'פירוש על פסוק ב');
+      // הקישור הראשון מחובר לשורת מקור עם lineIndex תקין.
+      final link = (json['links'] as List).firstWhere((l) => l['sourceLineIndex'] == 0);
+      expect(link['targetBookTitle'], 'רשי על בראשית');
+    });
+
+    test('GET /books/{id}/page with commentators filter', () async {
+      // מסנן ל-targetBookId שלא קיים → אין קישורים אבל השורות עדיין מוחזרות.
+      final (status, json) = await _get(router, '/books/1/page?start=0&end=2&commentators=999');
+      expect(status, 200);
+      expect((json['lines'] as List), hasLength(3));
+      expect((json['links'] as List), isEmpty);
+      expect((json['commentaryContent'] as Map), isEmpty);
+    });
+
+    test('GET /books/{id}/page range without links', () async {
+      // שורה 1 (id 11) אין עליה קישורים.
+      final (status, json) = await _get(router, '/books/1/page?start=1&end=1');
+      expect(status, 200);
+      expect((json['lines'] as List), hasLength(1));
+      expect((json['links'] as List), isEmpty);
+    });
+
+    test('GET /books/{id}/page missing book → 404', () async {
+      final (status, _) = await _get(router, '/books/999/page?start=0&end=2');
+      expect(status, 404);
     });
   });
 }
