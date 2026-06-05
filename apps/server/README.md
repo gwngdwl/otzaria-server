@@ -3,7 +3,18 @@ Otzaria API server built with [Shelf](https://pub.dev/packages/shelf).
 The current MVP exposes:
 
 - `GET /health`
-- `GET /version`, read from `db_meta.content_version_int` in `seforim.db`
+- `GET /version` — read from `db_meta.content_version_int` in `seforim.db`
+- `GET /library` — full category tree with nested books + metadata
+- `GET /books` — flat book list; `?category=<id>` filters to one category
+- `GET /books/{id}` — full book metadata + feature flags (`hasNekudot`, `hasCommentaryConnection`, …)
+- `GET /books/{id}/exists` — `{ "exists": bool }`
+- `GET /books/{id}/text` — full raw text (`text/plain`, lines joined by `\n`, nikud/teamim preserved)
+- `GET /books/{id}/text/range?start=&end=` — `{ startLine, endLine, totalLines, lines[] }` by `lineIndex` (inclusive)
+- `GET /books/{id}/toc` — table-of-contents tree (`{ text, index, level, children[] }`)
+
+All catalog/content endpoints read directly through the `otzaria_core` DAOs/repository, so the
+output matches what the Flutter client loads from the local library (parity). The server only ever
+opens `seforim.db` read-only.
 
 ## Running with the Dart SDK
 

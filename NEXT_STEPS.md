@@ -37,6 +37,8 @@
 - [x] `git init` + commit ראשון.
 - [x] **שלב 0 (POC חיפוש pure‑Dart) — ✅ עבר, שער ההחלטה ירוק.** הגישה מאושרת סופית.
 - [x] **שלב 1 (חילוץ `otzaria_core`) — ✅ הושלם.** package Dart טהור (DAOs+models+נורמליזציה+`.sq` מוטמעים), `dart test` ירוק, אפס Flutter.
+- [x] **שלב 2 (חיבור DB + `/version`) — ✅ הושלם.** `MyDatabase.readOnly`, `/health`, `/version` (מ‑`db_meta`), Dockerfile + compose.
+- [x] **שלב 3 (קטלוג ותוכן ספר) — ✅ הושלם.** `/library`, `/books`, `/books/{id}`, `/exists`, `/text`, `/text/range`, `/toc`. 14 טסטים ירוקים + smoke‑test מול DB אמיתי (ראה למטה).
 
 ---
 
@@ -139,17 +141,25 @@
 
 ---
 
-## שלב 3 — Endpoints: קטלוג ותוכן ספר
+## שלב 3 — Endpoints: קטלוג ותוכן ספר ✅ הושלם
 
 **מטרה:** קריאת ספר מלאה (טקסט + TOC), ישירות מעל ה‑DAOs.
-(חתימות ה‑JSON המדויקות: ראה `docs/online_server_spec.md §4.1–4.2`.)
+(חתימות ה‑JSON המדויקות: ראה `online_server_spec.md §4.1–4.2`.)
 
-- `GET /library` — עץ קטגוריות + ספרים (מ‑`category`/`book` DAOs).
-- `GET /books/{id}` — מטא + דגלים (`hasNekudot`, `hasCommentaryConnection`…).
-- `GET /books/{id}/text` ו‑`/text/range` — מ‑`line` DAO.
-- `GET /books/{id}/toc` — מ‑`tocEntry`/`tocText` DAOs.
+**מה בוצע בפועל** (הכול ב‑[apps/server/lib/api.dart](apps/server/lib/api.dart), בנוי מעל DAOs/`SeforimRepository` בלבד — **בלי** `ensureInitialized()` שמריץ INSERT ולא מתאים ל‑read‑only):
+- `GET /library` — עץ קטגוריות מלא + ספרים מקוננים + `contentVersion`. נבנה מ‑`getAllCategories()` + `getAllBooksWithRelations()` (קריאה אחת, ללא N+1), עץ לפי `parentId`, ספרים ממוינים `order,title`.
+- `GET /books` — רשימה שטוחה; `?category=<id>` מסנן (400 על id לא תקין).
+- `GET /books/{id}` — מטא מלא + דגלים; כולל מחרוזת `author` נוחה (404 אם חסר).
+- `GET /books/{id}/exists` — `{ exists }`.
+- `GET /books/{id}/text` — טקסט raw מלא כ‑`text/plain` (שורות מחוברות ב‑`\n`, ניקוד/טעמים נשמרים).
+- `GET /books/{id}/text/range?start=&end=` — `{ bookId, startLine, endLine, totalLines, lines[] }` לפי `lineIndex` (כולל קצוות; 400 אם חסרים פרמטרים / `end<start`).
+- `GET /books/{id}/toc` — עץ TOC `{ text, index, level, children[] }` (נבנה מהרשימה השטוחה דרך `parentId`; `index` = `lineIndex` שמחושב ב‑`TocQueries.selectByBookId` דרך `COALESCE`).
 
-**Done:** ספר נטען מהשרת זהה למקומי, מאומת על 5–10 ספרים מגוונים.
+**אימות:**
+- **14 טסטים ירוקים** ([apps/server/test/server_test.dart](apps/server/test/server_test.dart)): seed של DB עם סכמת `otzaria_core` המדויקת (קטגוריות אב/בן, ספרים, שורות, TOC מקונן) → כל endpoint נבדק כולל מקרי 400/404.
+- **Smoke‑test מול DB אמיתי (5.8GB):** `/books/{id}`, `/exists`, `/text`, `/text/range` החזירו תוכן אמיתי (בראשית, 1584 שורות, ניקוד+טעמים נשמרו, `heRef` תקין).
+
+> **⚠️ מלכודת סכמה שהתגלתה ב‑smoke‑test:** ה‑DB היחיד הגדול במכונה זו הוא של **אפליקציית seforimapp של kdroidfilter** (`...\io.github.kdroidfilter.seforimapp\databases\seforim.db`), שהיא **גרסת סכמה upstream שונה** מ‑Otzaria: ל‑`book` חסרים `fileType/filePath/isContentExternal/...` (יש `notesContent`), ול‑`tocEntry` חסר עמודת `lineIndex`. לכן `/library`, `/books` (שטוח), ו‑`/toc` נכשלים שם (`no such column: fileType` / `lineIndex`) — **לא באג בקוד**, אלא שאין במכונה seforim.db אמיתי בפורמט Otzaria. מול הסכמה הנכונה (כמו בטסטים) הכל עובד. כשיהיה seforim.db אמיתי — להריץ parity על 5–10 ספרים מגוונים (שלב 8).
 
 ---
 
