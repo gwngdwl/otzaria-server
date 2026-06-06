@@ -915,7 +915,7 @@ FROM link l
 JOIN connection_type ct ON l.connectionTypeId = ct.id
 JOIN book b ON l.targetBookId = b.id
 JOIN line tl ON l.targetLineId = tl.id
-WHERE l.sourceLineId IN ?
+WHERE l.sourceLineId IN (?)
 ORDER BY b.orderIndex;
 
 selectLinksBySourceBook:

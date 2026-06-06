@@ -39,7 +39,7 @@
 - [x] **שלב 1 (חילוץ `otzaria_core`) — ✅ הושלם.** package Dart טהור (DAOs+models+נורמליזציה+`.sq` מוטמעים), `dart test` ירוק, אפס Flutter.
 - [x] **שלב 2 (חיבור DB + `/version`) — ✅ הושלם.** `MyDatabase.readOnly`, `/health`, `/version` (מ‑`db_meta`), Dockerfile + compose.
 - [x] **שלב 3 (קטלוג ותוכן ספר) — ✅ הושלם.** `/library`, `/books`, `/books/{id}`, `/exists`, `/text`, `/text/range`, `/toc`. 14 טסטים ירוקים + smoke‑test מול DB אמיתי (ראה למטה).
-- [x] **שלב 4 (קישורים + עמוד מאוחד ⭐) — ✅ הושלם.** `/links`, `/links/range`, `POST /links/content`, ו‑`/page` המאוחד. 24 טסטים ירוקים + smoke‑test מול DB אמיתי (5 שורות בראשית → 5 שורות + 2600 קישורים + 2501 תוכני מפרשים בקריאה אחת).
+- [x] **שלב 4 (קישורים + עמוד מאוחד ⭐) — ✅ הושלם.** `/links`, `/links/range`, `POST /links/content`, ו‑`/page` המאוחד. 24 טסטים ירוקים + smoke‑test מול ה‑DB האמיתי (בראשית → 4 שורות + 3005 קישורים + 2935 תוכני מפרשים בקריאה אחת). תוקן באג ב‑otzaria_core (`LinkQueries.sq`: `IN ?`→`IN (?)`).
 
 ---
 
@@ -158,9 +158,9 @@
 
 **אימות:**
 - **14 טסטים ירוקים** ([apps/server/test/server_test.dart](apps/server/test/server_test.dart)): seed של DB עם סכמת `otzaria_core` המדויקת (קטגוריות אב/בן, ספרים, שורות, TOC מקונן) → כל endpoint נבדק כולל מקרי 400/404.
-- **Smoke‑test מול DB אמיתי (5.8GB):** `/books/{id}`, `/exists`, `/text`, `/text/range` החזירו תוכן אמיתי (בראשית, 1584 שורות, ניקוד+טעמים נשמרו, `heRef` תקין).
+- **Smoke‑test מול ה‑DB האמיתי** (`C:\ProgramData\otzaria\books\seforim.db`, 6.3GB): `/version`=1, `/library`=17 קטגוריות שורש (תלמוד בבלי/תנ"ך/משנה/ירושלמי/מדרש/הלכה…), `/books/1`=בראשית (txt, 1584 שורות, ניקוד), `/toc`=שורש "בראשית" עם 50 ילדים. **כל ה‑endpoints עובדים מול הסכמה האמיתית.**
 
-> **⚠️ מלכודת סכמה שהתגלתה ב‑smoke‑test:** ה‑DB היחיד הגדול במכונה זו הוא של **אפליקציית seforimapp של kdroidfilter** (`...\io.github.kdroidfilter.seforimapp\databases\seforim.db`), שהיא **גרסת סכמה upstream שונה** מ‑Otzaria: ל‑`book` חסרים `fileType/filePath/isContentExternal/...` (יש `notesContent`), ול‑`tocEntry` חסר עמודת `lineIndex`. לכן `/library`, `/books` (שטוח), ו‑`/toc` נכשלים שם (`no such column: fileType` / `lineIndex`) — **לא באג בקוד**, אלא שאין במכונה seforim.db אמיתי בפורמט Otzaria. מול הסכמה הנכונה (כמו בטסטים) הכל עובד. כשיהיה seforim.db אמיתי — להריץ parity על 5–10 ספרים מגוונים (שלב 8).
+> **📍 מיקום ה‑DB האמיתי:** `C:\ProgramData\otzaria\books\seforim.db` (סכמת Otzaria מלאה: יש `fileType`, `tocEntry.lineIndex`, `db_meta`). **שים לב — לא לבלבל** עם `...\io.github.kdroidfilter.seforimapp\databases\seforim.db`, שהוא גרסת סכמה upstream שונה (חסר `fileType`/`lineIndex`) ו‑`/library`/`/toc`/`/books` נכשלים מולה.
 
 ---
 
@@ -176,9 +176,9 @@
 
 **אימות:**
 - **24 טסטים ירוקים** — seed הורחב עם `connection_type`, `link`, וספר מפרש (רש"י) עם שורות יעד; כל endpoint נבדק כולל סינון/400/404.
-- **Smoke‑test מול DB אמיתי:** `/books/1/page?start=0&end=4` החזיר 5 שורות + **2600 קישורים + 2501 תוכני מפרשים בקריאה אחת**, עם `sourceLineIndex`/`targetBookTitle` תקינים → אתגר ה‑latency נפתר.
+- **Smoke‑test מול ה‑DB האמיתי:** `/books/1/page?start=0&end=3` החזיר 4 שורות + **3005 קישורים + 2935 תוכני מפרשים בקריאה אחת**, עם `sourceLineIndex`/`targetBookTitle` תקינים → אתגר ה‑latency נפתר.
 
-> **🐞 באג שהתגלה ב‑otzaria_core (לתיקון upstream):** `LinkDao.selectLinksBySourceLineIds` שבור — ה‑`.sq` המוטמע מכיל `WHERE l.sourceLineId IN ?` (**ללא סוגריים**), וה‑DAO מחליף את ה‑`?` ב‑`?,?` ⇒ `IN ?,?` (תחביר SQL שגוי, `near "?": syntax error`). התיקון הנכון: `IN (?)` ב‑`.sq` המקורי (ואז ה‑gen). **עוקף בשרת:** ה‑endpoints של שלב 4 מריצים את אותה שאילתה ישירות עם `IN (?,?,…)` תקין (ראה `_linksForSourceLineIds`), ולכן אינם תלויים בתיקון. כדאי לתקן את ה‑`.sq` באפליקציה כי ייתכן שגם היא נפגעת.
+> **🐞 באג ב‑otzaria_core — ✅ תוקן:** `LinkDao.selectLinksBySourceLineIds` היה שבור — ה‑`.sq` הכיל `WHERE l.sourceLineId IN ?` (**ללא סוגריים**), וה‑DAO מחליף את ה‑`?` ב‑`?,?` ⇒ `IN ?,?` (תחביר SQL שגוי). **התיקון:** `LinkQueries.sq` שונה ל‑`IN (?)` ו‑`sql_queries_data.dart` נוצר מחדש (`dart run tool/gen_sql_data.dart`); כעת ה‑DAO מייצר `IN (?,?,…)` תקין. השרת חזר להשתמש ב‑DAO ישירות (אין יותר עוקף). ⚠️ אם ה‑`.sq` באפליקציית Otzaria עדיין מכיל `IN ?` — צריך תיקון מקביל שם.
 
 **Done:** ✅ גלילה בספר עם מפרשים נטענת בקריאה אחת.
 

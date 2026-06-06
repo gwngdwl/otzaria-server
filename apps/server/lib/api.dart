@@ -290,25 +290,10 @@ Router buildApiRouter(MyDatabase db) {
 }
 
 /// שולף קישורים לפי source lineIds (עם תוכן היעד), עם הגנה מפני `IN ()` ריק.
-///
-/// השאילתה רצה ישירות ולא דרך `LinkDao.selectLinksBySourceLineIds` בגלל באג
-/// ב-otzaria_core: ה-`.sq` המוטמע מכיל `IN ?` (ללא סוגריים), וה-DAO מחליף
-/// `?` ב-`?,?` ⇒ `IN ?,?` (תחביר שגוי). כאן בונים `IN (?,?,…)` תקין.
 Future<List<Map<String, dynamic>>> _linksForSourceLineIds(
     MyDatabase db, List<int> lineIds) async {
   if (lineIds.isEmpty) return const [];
-  final raw = await db.database;
-  final placeholders = List.filled(lineIds.length, '?').join(',');
-  return raw.select('''
-    SELECT l.*, ct.name AS connectionType, b.title AS targetBookTitle,
-           tl.content AS targetText
-    FROM link l
-    JOIN connection_type ct ON l.connectionTypeId = ct.id
-    JOIN book b ON l.targetBookId = b.id
-    JOIN line tl ON l.targetLineId = tl.id
-    WHERE l.sourceLineId IN ($placeholders)
-    ORDER BY b.orderIndex
-  ''', lineIds).toMapList();
+  return db.linkDao.selectLinksBySourceLineIds(lineIds);
 }
 
 /// סריאליזציה אחידה של שורת קישור (תוצאת JOIN ל-connection_type).
