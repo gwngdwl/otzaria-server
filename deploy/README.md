@@ -1,12 +1,21 @@
 # Deployment
 
-This is the practical VPS deployment path for the current MVP server. The API currently exposes `/health` and `/version`; `/version` proves that the service opened the real `seforim.db` read-only and can read `db_meta.content_version_int`.
+This is the practical VPS deployment path for the current MVP server. The API exposes `/health`,
+`/version`, the catalog/content endpoints (`/library`, `/books`, `/books/{id}`, `/text`, `/text/range`,
+`/toc`), and the links + unified page endpoints (`/links`, `/links/range`, `POST /links/content`,
+`/page`). The service opens `seforim.db` read-only and never writes its content.
 
 ## Server prerequisites
 
 - A Linux VPS with Docker and Docker Compose.
-- A readable `seforim.db` on the VPS. The default path used by `compose.yaml` is `/srv/otzaria/seforim.db`.
+- A directory on the VPS holding `seforim.db`. The default directory used by `compose.yaml` is
+  `/srv/otzaria` (so the DB is `/srv/otzaria/seforim.db`).
 - Port `8080` open locally, or a reverse proxy in front of it.
+
+> **WAL sidecars / writable directory.** Otzaria's `seforim.db` ships in WAL journal mode, so SQLite
+> must create `seforim.db-shm` / `seforim.db-wal` next to it even on a read-only connection. The DB
+> *content* is never modified (opened with `OpenMode.readOnly`), but the **directory must be writable**.
+> That's why `compose.yaml` bind-mounts the *directory* (writable), not the file as `:ro`.
 
 ## First deployment
 
@@ -33,7 +42,7 @@ Then deploy:
 ```bash
 git clone https://github.com/gwngdwl/otzaria-server.git
 cd otzaria-server
-OTZARIA_SEFORIM_DB_PATH=/srv/otzaria/seforim.db docker compose up -d --build
+OTZARIA_SEFORIM_DIR=/srv/otzaria docker compose up -d --build
 ```
 
 Verify locally on the VPS:
@@ -54,7 +63,7 @@ Expected shape:
 
 ```bash
 git pull --ff-only
-OTZARIA_SEFORIM_DB_PATH=/srv/otzaria/seforim.db docker compose up -d --build
+OTZARIA_SEFORIM_DIR=/srv/otzaria docker compose up -d --build
 docker compose logs --tail=100 api
 ```
 

@@ -11,7 +11,10 @@ services:
       PORT: "8080"
       SEFORIM_DB_PATH: /data/seforim.db
     volumes:
+      # מ-mount-ים את התיקייה (לא רק את הקובץ) ובכתיבה: ה-seforim.db של Otzaria
+      # שמור ב-journal_mode=WAL, ולכן SQLite חייב ליצור את קבצי ה-sidecar
+      # seforim.db-shm / -wal לצד ה-DB כדי לקרוא — גם בחיבור read-only.
+      # תוכן ה-DB עצמו לעולם לא נכתב (השרת פותח עם OpenMode.readOnly).
       - type: bind
-        source: ${OTZARIA_SEFORIM_DB_PATH:-/srv/otzaria/seforim.db}
-        target: /data/seforim.db
-        read_only: true
+        source: ${OTZARIA_SEFORIM_DIR:-/srv/otzaria}
+        target: /data

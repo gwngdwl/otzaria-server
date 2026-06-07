@@ -143,7 +143,12 @@ class MyDatabase {
 
   /// פתיחה ל-**קריאה בלבד** של DB קיים (השרת). נפתח עם `OpenMode.readOnly`,
   /// **בלי** `PRAGMA journal_mode=WAL` ו**בלי** סקריפטי יצירת הסכמה — השרת
-  /// לעולם לא כותב ל-seforim.db, וה-DB נבנה מראש.
+  /// לעולם לא כותב ל-**תוכן** seforim.db, וה-DB נבנה מראש.
+  ///
+  /// ⚠️ אם ה-DB שמור ב-journal_mode=WAL (כמו ה-seforim.db של Otzaria), SQLite
+  /// יוצר/משתמש בקבצי ה-sidecar `seforim.db-shm` ו-`seforim.db-wal` שלצד הקובץ
+  /// גם בחיבור read-only — ולכן **התיקייה** שמכילה את ה-DB חייבת להיות
+  /// ניתנת-לכתיבה. תוכן ה-DB עצמו לא משתנה (ה-mtime נשמר).
   MyDatabase.readOnly(String path)
       : _path = path,
         _readOnly = true;
@@ -161,7 +166,9 @@ class MyDatabase {
 
   sqlite3.Database _initDatabase() {
     if (_readOnly) {
-      // קריאה בלבד: ללא WAL, ללא CREATE — לא נוגעים בקובץ.
+      // קריאה בלבד: ללא PRAGMA WAL וללא CREATE — לא כותבים לתוכן ה-DB.
+      // הערה: ל-DB ב-WAL, SQLite עדיין יוצר sidecars (-shm/-wal) בתיקייה
+      // לצורך תיאום הקריאה (התיקייה חייבת להיות ניתנת-לכתיבה).
       return sqlite3.sqlite3.open(_path, mode: sqlite3.OpenMode.readOnly);
     }
 
